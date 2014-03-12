@@ -1,13 +1,14 @@
-package pipeline
+package buffered
 
 import(
     "testing"
     "strings"
     "time"
     "runtime"
+    "github.com/lisael/pipeline"
 )
 
-func TestGenericBufferedPipe(t *testing.T){
+func TestPipe(t *testing.T){
     runtime.GOMAXPROCS(runtime.NumCPU())
     // fake source
     input := make(chan interface{})
@@ -20,12 +21,12 @@ func TestGenericBufferedPipe(t *testing.T){
     processor := func(input interface{}) (output interface{}, err error){
         return strings.ToUpper(input.(string)), nil
     }
-    gbp := NewGenericBufferedPipe(processor, 4, 200)
-	// test it does implements Pipe
+    gbp := NewPipe(processor, 4, 200)
+	// test it does implements pipeline.Pipe
 	var in interface{} = gbp
-	_, ok := in.(Pipe)
+	_, ok := in.(pipeline.Pipe)
 	if ! ok {
-		t.Errorf("*GenericBufferedPipe doesn't implement Pipe")
+		t.Errorf("*Pipe doesn't implement pipeline.Pipe")
 	}
     output, _ := gbp.ConnectPipe(input)
     gbp.Run()
@@ -34,13 +35,13 @@ func TestGenericBufferedPipe(t *testing.T){
     if o1 != "HELLO"{
         t.Errorf(o1.(string))
     }
-    if gbp.Status() != RUNNING{
+    if gbp.Status() != pipeline.RUNNING{
         t.Errorf("should be running...")
     }
     // wait for the output to fill
     <- time.After(100*1e5)
     gbp.Pause()
-    if gbp.Status() != PAUSED{
+    if gbp.Status() != pipeline.PAUSED{
         t.Errorf("should be paused...")
     }
     if len(output) != 200 {
@@ -61,7 +62,7 @@ func TestGenericBufferedPipe(t *testing.T){
     }
 }
 
-func TestGenericBufferedPipeOrder(t *testing.T){
+func TestPipeOrder(t *testing.T){
     runtime.GOMAXPROCS(runtime.NumCPU())
     // fake source
     input := make(chan interface{})
@@ -74,7 +75,7 @@ func TestGenericBufferedPipeOrder(t *testing.T){
     processor := func(in interface{}) (out interface{}, err error){
         return in, nil
     }
-    gbp := NewGenericBufferedPipe(processor, 4, 200)
+    gbp := NewPipe(processor, 4, 200)
     output, _ := gbp.ConnectPipe(input)
     gbp.Run()
     last := -1

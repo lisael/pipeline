@@ -1,7 +1,8 @@
-package pipeline
+package buffered
 
 import(
 	"runtime"
+    "github.com/lisael/pipeline"
 )
 
 type task struct{
@@ -11,10 +12,10 @@ type task struct{
 
 type PipeProcessor func(input interface{}) (output interface{}, err error)
 
-// GenericBufferedPipe applies a function to elements of its input chan and
+// Pipe applies a function to elements of its input chan and
 // sends the result on its output. It is a buffered pipe for CPU bound tasks
-type GenericBufferedPipe struct{
-	status		PipeStatus
+type Pipe struct{
+	status		pipeline.PipeStatus
 	processor	PipeProcessor
 	workers		int // max number of workers
 	running		int // running workers
@@ -32,13 +33,13 @@ type GenericBufferedPipe struct{
 	resumeo     chan bool
 }
 
-// NewGenericBufferedPipe is the standard constructor. It is scalable up to `workers`
+// NewPipe is the standard constructor. It is scalable up to `workers`
 // workers. If 0, it defaults to GOMAXPROCS (must be set before...). The buffer size
 // is fixed by `buffer`. 1000 seems a good trade-off to avoid both starvation and bloating
 // while keeping RAM usage low (for typical result structs).
-func NewGenericBufferedPipe(processor PipeProcessor, workers int, buffer int) (p *GenericBufferedPipe){
-	p = new(GenericBufferedPipe)
-	p.status = WAITING
+func NewPipe(processor PipeProcessor, workers int, buffer int) (p *Pipe){
+	p = new(Pipe)
+	p.status = pipeline.WAITING
 	p.processor = processor
 	if workers < 1{ workers = runtime.GOMAXPROCS(0) }
 	p.workers = workers
@@ -55,7 +56,7 @@ func NewGenericBufferedPipe(processor PipeProcessor, workers int, buffer int) (p
 	return
 }
 
-func (self *GenericBufferedPipe) worker(){
+func (self *Pipe) worker(){
 	for{
 		select{
 		case <- self.stop:
@@ -68,52 +69,52 @@ func (self *GenericBufferedPipe) worker(){
 	}
 }
 
-func (self *GenericBufferedPipe) stopWorkers(){
+func (self *Pipe) stopWorkers(){
 	for self.running > 0{
 		self.stop <- true
 		self.running --
 	}
 }
 
-func (self *GenericBufferedPipe) startAllWorkers(){
+func (self *Pipe) startAllWorkers(){
 	for i:=0; i<self.workers; i++ {
 		go self.worker()
 		self.running ++
 	}
 }
 
-func (self *GenericBufferedPipe) Pause() error{
+func (self *Pipe) Pause() error{
     // TODO: return an error here
-	if self.status != RUNNING{ return nil }
+	if self.status != pipeline.RUNNING{ return nil }
 	// stop the read/write goroutines (launched in Run())
 	self.pausei <- true
 	self.pauseo <- true
 	self.stopWorkers()
-	self.status = PAUSED
+	self.status = pipeline.PAUSED
 	return nil
 }
 
-func (self *GenericBufferedPipe) Resume() error{
+func (self *Pipe) Resume() error{
     // TODO: return an error here
-	if self.status != PAUSED{ return nil }
+	if self.status != pipeline.PAUSED{ return nil }
     self.startAllWorkers()
     self.resumei <- true
     self.resumeo <- true
-    self.status = RUNNING
+    self.status = pipeline.RUNNING
 	return nil
 }
 
-func (self *GenericBufferedPipe) Status() PipeStatus{
+func (self *Pipe) Status() pipeline.PipeStatus{
 	return self.status
 }
 
-func (self *GenericBufferedPipe) ConnectPipe(input chan interface{}) (output chan interface{}, err error){
+func (self *Pipe) ConnectPipe(input chan interface{}) (output chan interface{}, err error){
     self.input = input
-    self.status = READY
+    self.status = pipeline.READY
     return self.output, nil
 }
 
-func (self *GenericBufferedPipe) Run(){
+func (self *Pipe) Run(){
     self.startAllWorkers()
 	// read the input
 	go func(){
@@ -191,7 +192,7 @@ func (self *GenericBufferedPipe) Run(){
 		}
 		close(self.output)
 	}()
-	self.status = RUNNING
+	self.status = pipeline.RUNNING
     return
 }
 
