@@ -21,10 +21,15 @@ func TestGenericBufferedPipe(t *testing.T){
         return strings.ToUpper(input.(string)), nil
     }
     gbp := NewGenericBufferedPipe(processor, 4, 200)
-    output := gbp.Run(input)
-    println("coucou")
+	// test it does implements Pipe
+	var in interface{} = gbp
+	_, ok := in.(Pipe)
+	if ! ok {
+		t.Errorf("*GenericBufferedPipe doesn't implement Pipe")
+	}
+    output, _ := gbp.ConnectPipe(input)
+    gbp.Run()
     o1 := <- output
-    println("coucou")
     // test that the processor was called on 
     if o1 != "HELLO"{
         t.Errorf(o1.(string))
@@ -34,9 +39,7 @@ func TestGenericBufferedPipe(t *testing.T){
     }
     // wait for the output to fill
     <- time.After(100*1e5)
-    println("coucou")
     gbp.Pause()
-    println("coucou")
     if gbp.Status() != PAUSED{
         t.Errorf("should be paused...")
     }
@@ -72,7 +75,8 @@ func TestGenericBufferedPipeOrder(t *testing.T){
         return in, nil
     }
     gbp := NewGenericBufferedPipe(processor, 4, 200)
-    output := gbp.Run(input)
+    output, _ := gbp.ConnectPipe(input)
+    gbp.Run()
     last := -1
     for o := range output{
         if o.(int) != last + 1{

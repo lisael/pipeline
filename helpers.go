@@ -20,9 +20,10 @@ type GenericBufferedPipe struct{
 	running		int // running workers
 	tasks		chan *task // work queue
 	results		chan chan interface{} // pending results
-	bufferSize	int
 	stop		chan bool // tells one worker to stop
     errors      chan error
+    input       chan interface{}
+    output       chan interface{}
 
     // control input and output read/write
 	pausei	    chan bool
@@ -42,9 +43,9 @@ func NewGenericBufferedPipe(processor PipeProcessor, workers int, buffer int) (p
 	if workers < 1{ workers = runtime.GOMAXPROCS(0) }
 	p.workers = workers
 	if buffer < 0 { buffer = 0}
-	p.bufferSize = buffer
 	p.tasks = make(chan *task, buffer)
 	p.results = make(chan chan interface{}, buffer)
+    p.output = make(chan interface{}, buffer)
 	p.stop = make(chan bool)
 	p.errors = make(chan error)
 	p.pausei = make(chan bool)
@@ -106,9 +107,13 @@ func (self *GenericBufferedPipe) Status() PipeStatus{
 	return self.status
 }
 
+func (self *GenericBufferedPipe) ConnectPipe(input chan interface{}) (output chan interface{}, err error){
+    self.input = input
+    self.status = READY
+    return self.output, nil
+}
 
-func (self *GenericBufferedPipe) Run(input chan interface{}) (output chan interface{}){
-    output = make(chan interface{}, self.bufferSize)
+func (self *GenericBufferedPipe) Run(){
     self.startAllWorkers()
 	// read the input
 	go func(){
@@ -119,7 +124,7 @@ func (self *GenericBufferedPipe) Run(input chan interface{}) (output chan interf
             select{
                 case <- self.pausei:
                     <- self.resumei
-                case i, ok = <- input:
+                case i, ok = <- self.input:
                     if !ok {
                         break outer1
                     }
@@ -179,12 +184,12 @@ func (self *GenericBufferedPipe) Run(input chan interface{}) (output chan interf
                 select{
                 case <- self.pauseo:
                     <- self.resumeo
-                case output <- r:
+                case self.output <- r:
                     break inner4
                 }
             }
 		}
-		close(output)
+		close(self.output)
 	}()
 	self.status = RUNNING
     return

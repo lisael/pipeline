@@ -9,6 +9,8 @@ import(
 type PassThrough struct{
     pause chan bool
 	status PipeStatus
+    output chan interface{}
+    input chan interface{}
 }
 
 func NewPassThrough() (p *PassThrough){
@@ -33,9 +35,7 @@ func (p *PassThrough) Status() PipeStatus{
 	return p.status
 }
 
-
-func (p *PassThrough) Run(input chan interface{}) (output chan interface{}){
-    output = make(chan interface{})
+func (p *PassThrough) Run(){
     go func(){
         for {
             select{
@@ -43,16 +43,22 @@ func (p *PassThrough) Run(input chan interface{}) (output chan interface{}){
                 <- p.pause
             default:
             }
-            stuff := <-input
-			if stuff == nil{ break }
+            stuff, ok := <-p.input
+			if !ok{ break }
             stufs := stuff.(string)
 			_ = stufs
-            output <- stuff
+            p.output <- stuff
         }
-		close(output)
+		close(p.output)
     }()
 	p.status = RUNNING
-    return
+}
+
+func (p *PassThrough) ConnectPipe(input chan interface{}) (output chan interface{}, err error){
+    p.output = make(chan interface{})
+    p.input = input
+	p.status = READY
+    return p.output, nil
 }
 
 // a simple Source
@@ -61,6 +67,8 @@ type DummySource struct{
 	size int
 	status PipeStatus
 	pause  chan	bool
+    input chan interface{}
+    output chan interface{}
 }
 
 func NewDummySource(msg string, size int)(ds *DummySource){
@@ -70,7 +78,6 @@ func NewDummySource(msg string, size int)(ds *DummySource){
 	ds.status = WAITING
 	return
 }
-
 
 func (self *DummySource) Pause() error{
 	if self.status == PAUSED{return nil}
@@ -90,20 +97,25 @@ func (self *DummySource) Status() PipeStatus{
 	return self.status
 }
 
-func (self *DummySource) Pump() (output chan interface{}){
-	output = make(chan interface{})
+func (self *DummySource) Run(){
 	go func(){
 		for i := 0; i<self.size; i++{
 			select{
 			case <- self.pause:
 				<- self.pause
 			default:
-				output <- self.msg
+				self.output <- self.msg
 			}
 		}
-		close(output)
+		close(self.output)
 	}()
-	return
+    self.status = RUNNING
+}
+
+func (self *DummySource) ConnectPump() (output chan interface{}, err error){
+	self.output = make(chan interface{})
+    self.status = READY
+	return self.output, nil
 }
 
 // a simple counting blackhole Sink 
@@ -111,6 +123,8 @@ type NullSink struct{
 	status PipeStatus
 	pause  chan	bool
 	items int
+    stop chan bool
+    input chan interface{}
 }
 
 func NewNullSink()(ns *NullSink){
@@ -137,8 +151,7 @@ func (self *NullSink) Status() PipeStatus{
 	return self.status
 }
 
-func (self *NullSink) Flush(input chan interface{}) (stop chan bool){
-	stop = make(chan bool)
+func (self *NullSink) Run() {
 	go func(){
         for {
             select{
@@ -146,14 +159,21 @@ func (self *NullSink) Flush(input chan interface{}) (stop chan bool){
                 <- self.pause
             default:
             }
-            stuff := <-input
+            stuff := <-self.input
 			if stuff == nil{ break }
 			self.items ++
         }
-        stop <- true
-		close(stop)
+        self.stop <- true
+		close(self.stop)
 	}()
-	return
+    self.status = RUNNING
+}
+
+func (self *NullSink) ConnectFlush(input chan interface{}) (stop chan bool, err error){
+	self.stop = make(chan bool)
+    self.input = input
+    self.status = READY
+	return self.stop, nil
 }
 
 
@@ -176,7 +196,8 @@ func TestPassThrough(t *testing.T){
 		close(input)
     }()
 	// does what we expect. Passing through.
-    o := pt.Run(input)
+    o, _:= pt.ConnectPipe(input)
+    pt.Run()
     res := <- o
 	if res != inputs{
 		t.Errorf("Expected %s on output", inputs)
@@ -212,7 +233,8 @@ func TestPipeLine(t *testing.T){
 	pl.AddPipe(NewPassThrough())
 	sink := NewNullSink()
 	pl.AddSink(sink)
-	stop := pl.Stream()
+	stop := pl.Connect()
+    pl.Run()
 	<- stop
     if sink.items != 1000 {
         t.Errorf("expected 1000 items in sink. got %d", sink.items)

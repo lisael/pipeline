@@ -2,42 +2,62 @@ package pipeline
 
 import(
 	"errors"
+    "fmt"
 )
 
 type PipeStatus int
 
+type PipeError struct{
+    msg string
+}
+
+func (self *PipeError) Error() string {
+    return self.msg
+}
+
+func PipeErrorf(format string, chunks ...interface{}) (err *PipeError) {
+    err = new(PipeError)
+    err.msg = fmt.Sprintf(format, chunks...)
+    return
+}
+
 const(
-    WAITING PipeStatus = iota
-    RUNNING
-    PAUSED
-    CLOSED
-    ERROR
+    ERROR PipeStatus = iota // something bad append. blocked
+    WAITING // not connected yet
+    READY // ready to go
+    PAUSED // paused, i.e. doesn't read or write on ports
+    CLOSED // finished. ports are all closed
+    RUNNING // well... running.
 )
 
+type Runable interface{
+    Run()
+}
+
 type Pausable interface{
-    // Pause the flow in that pipe. Must Block until it stoped reading its
-    // input chan, writing its output chan, and Status() must return PAUSED
+    Runable
+    // Pause the flow in that pipe. Must Block until it stopped reading its
+    // input chan, writing its output chan, and Status() returns PAUSED
     Pause() error
     // Resume after a pause. Must block until the input chan is read. Status()
-    // must return RUNNING
+    // returns RUNNING then.
     Resume() error
-    // Status returns a PipeStatus
     Status() PipeStatus
 }
 
 type Pipe interface{
     Pausable
-    Run(input chan interface{}) (output chan interface{})
+    ConnectPipe(input chan interface{}) (output chan interface{}, err error)
 }
 
 type Source interface{
     Pausable
-    Pump() (output chan interface{})
+    ConnectPump() (output chan interface{}, err error)
 }
 
 type Sink interface{
     Pausable
-    Flush(input chan interface{}) (stop chan bool)
+    ConnectFlush(input chan interface{}) (stop chan bool, err error)
 }
 
 type Managed interface{
@@ -68,6 +88,7 @@ type PipeLine struct{
 	source Source
 	pipes []Pipe
 	sink Sink
+    all []Runable
 }
 
 func NewPipeLine() (pl *PipeLine){
@@ -77,43 +98,61 @@ func NewPipeLine() (pl *PipeLine){
 	return
 }
 
+// implements Runable
+// Run starts the whole pipeline.
+func (self *PipeLine) Run(){
+    self.source.Run()
+	for _, p := range self.pipes{
+        p.Run()
+    }
+    self.sink.Run()
+}
+
+// Connect makes internal plumbing. The returned channel is written when all
+// Sinks are closed
+// TODO: handle errors
+func (self *PipeLine) Connect() (stop chan bool){
+	var output chan interface{}
+	output, _ = self.source.ConnectPump()
+	for _, p := range self.pipes{
+		output, _ = p.ConnectPipe(output)
+	}
+	stop, _ = self.sink.ConnectFlush(output)
+    self.status = READY
+	return
+}
+
 // implements Pipe
-func (self *PipeLine) Run(input chan interface{}) (output chan interface{}){
+// TODO
+func (self *PipeLine) ConnectPipe(input chan interface{}) (output chan interface{}){
 	output = make(chan interface{})
 	return
 }
 
 // implements Source
-func (self *PipeLine) Pump() (output chan interface{}){
+// TODO
+func (self *PipeLine) ConnectPump() (output chan interface{}){
 	output = make(chan interface{})
 	return
 }
 
 // implements Sink
-func (self *PipeLine) Flush(input chan interface{}) (stop chan bool){
+// TODO
+func (self *PipeLine) ConnectFlush(input chan interface{}) (stop chan bool){
 	stop = make(chan bool)
 	return
 }
 
 // implements Pausable
+// TODO
 func (self *PipeLine) Pause() error{return nil}
+// TODO
 func (self *PipeLine) Resume() error{return nil}
+// TODO
 func (self *PipeLine) Status() PipeStatus{return WAITING}
 
-// Stream runs the whole pipeline. The returned channel is written when all
-// Sinks are closed
-func (self *PipeLine) Stream() (stop chan bool){
-	var output chan interface{}
-	output = self.source.Pump()
-	for _, p := range self.pipes{
-		output = p.Run(output)
-	}
-	stop = self.sink.Flush(output)
-	return
-}
-
 func (self *PipeLine) AddSource(src Source) error{
-	if self.status != WAITING{
+	if self.status > WAITING{
 		return errors.New("Can't add a source after intialization phase\n")
 	}
 	if self.source != nil{
@@ -124,15 +163,15 @@ func (self *PipeLine) AddSource(src Source) error{
 }
 
 func (self *PipeLine) AddPipe(p Pipe) error{
-	if self.status != WAITING{
-		return errors.New("Can't add a source after intialization phase")
+	if self.status > WAITING{
+		return errors.New("Can't add a pipe after intialization phase")
 	}
 	self.pipes = append(self.pipes, p)
 	return nil
 }
 
 func (self *PipeLine) AddSink(sk Sink) error{
-	if self.status != WAITING{
+	if self.status > WAITING{
 		return errors.New("Can't add a sink after intialization phase")
 	}
 	if self.sink != nil{
