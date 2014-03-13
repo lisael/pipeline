@@ -3,6 +3,7 @@ package buffered
 import(
 	"runtime"
     "github.com/lisael/pipeline"
+    "github.com/lisael/pipeline/generic"
 )
 
 type task struct{
@@ -10,13 +11,12 @@ type task struct{
 	result chan interface{}
 }
 
-type PipeProcessor func(input interface{}) (output interface{}, err error)
 
 // Pipe applies a function to elements of its input chan and
 // sends the result on its output. It is a buffered pipe for CPU bound tasks
 type Pipe struct{
 	status		pipeline.PipeStatus
-	processor	PipeProcessor
+	processor	generic.PipeProcessor
 	workers		int // max number of workers
 	running		int // running workers
 	tasks		chan *task // work queue
@@ -37,7 +37,7 @@ type Pipe struct{
 // workers. If 0, it defaults to GOMAXPROCS (must be set before...). The buffer size
 // is fixed by `buffer`. 1000 seems a good trade-off to avoid both starvation and bloating
 // while keeping RAM usage low (for typical result structs).
-func NewPipe(processor PipeProcessor, workers int, buffer int) (p *Pipe){
+func NewPipe(processor generic.PipeProcessor, workers int, buffer int) (p *Pipe){
 	p = new(Pipe)
 	p.status = pipeline.WAITING
 	p.processor = processor

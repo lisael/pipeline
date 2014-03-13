@@ -52,12 +52,12 @@ type Pipe interface{
 
 type Source interface{
     Pausable
-    ConnectPump() (output chan interface{}, err error)
+    ConnectSource() (output chan interface{}, err error)
 }
 
 type Sink interface{
     Pausable
-    ConnectFlush(input chan interface{}) (stop chan bool, err error)
+    ConnectSink(input chan interface{}) (stop chan bool, err error)
 }
 
 type Managed interface{
